@@ -1,0 +1,5 @@
+[server]
+# Disable file watcher — sentence-transformers model cache writes
+# trigger false "file changed" restarts otherwise.
+fileWatcherType = "none"
+headless = true
