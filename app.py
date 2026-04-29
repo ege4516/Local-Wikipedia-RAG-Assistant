@@ -44,6 +44,8 @@ if "last_chunks" not in st.session_state:
     st.session_state.last_chunks = []
 if "last_category" not in st.session_state:
     st.session_state.last_category = ""
+if "pending_query" not in st.session_state:
+    st.session_state.pending_query = None
 
 
 # ── Cached resource initialisation ──────────────────────────────────────────
@@ -190,6 +192,12 @@ with st.sidebar:
 st.title("Local Wikipedia RAG Chat")
 st.caption("Ask about famous people and places. Everything runs locally.")
 
+# Chat input — accept new query, save to session state, rerun
+if user_input := st.chat_input("Ask about a person or place..."):
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.pending_query = user_input
+    st.rerun()
+
 # Render existing messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -211,11 +219,9 @@ if show_chunks and st.session_state.last_chunks:
             st.text(chunk["text"][:600] + ("..." if len(chunk["text"]) > 600 else ""))
             st.markdown("---")
 
-# Chat input
-if user_input := st.chat_input("Ask about a person or place..."):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+# Generate response for pending query (survives widget-triggered reruns)
+if st.session_state.pending_query:
+    query = st.session_state.pending_query
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
@@ -234,7 +240,7 @@ if user_input := st.chat_input("Ask about a person or place..."):
                     st.session_state.last_category = ""
                 else:
                     retriever = Retriever(vector_store=vector_store, embedder=embedder)
-                    result = retriever.retrieve(user_input, k=top_k)
+                    result = retriever.retrieve(query, k=top_k)
 
                     st.session_state.last_chunks = result["chunks"]
                     st.session_state.last_category = result["category"]
@@ -251,7 +257,7 @@ if user_input := st.chat_input("Ask about a person or place..."):
 
                     generator = Generator(model=selected_model)
                     answer = generator.generate(
-                        query=user_input,
+                        query=query,
                         chunks=result["chunks"],
                         chat_history=history,
                     )
@@ -263,4 +269,6 @@ if user_input := st.chat_input("Ask about a person or place..."):
         st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.pending_query = None
     st.rerun()
+

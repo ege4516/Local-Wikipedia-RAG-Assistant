@@ -17,19 +17,18 @@ two-word inputs.
 import logging
 from typing import Optional
 
-from sentence_transformers import SentenceTransformer
-
 from config import EMBED_MODEL
 
 logger = logging.getLogger(__name__)
 
 # Module-level singleton so the model is loaded once and shared.
-_model: Optional[SentenceTransformer] = None
+_model = None
 
 
-def _get_model() -> SentenceTransformer:
+def _get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer  # lazy import
         logger.info("Loading sentence-transformers model '%s' …", EMBED_MODEL)
         _model = SentenceTransformer(EMBED_MODEL)
         logger.info("Model loaded — dimension = %d", _model.get_embedding_dimension())
