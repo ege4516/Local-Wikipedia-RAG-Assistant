@@ -6,6 +6,7 @@ Run with: streamlit run app.py
 import logging
 import os
 import sys
+import time
 
 import streamlit as st
 
@@ -46,6 +47,10 @@ if "last_category" not in st.session_state:
     st.session_state.last_category = ""
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
+if "response_cache" not in st.session_state:
+    st.session_state.response_cache = {}   # (query, model, k) → {answer, chunks, category, latency}
+if "last_latency" not in st.session_state:
+    st.session_state.last_latency = {}     # {retrieval_ms, generation_ms, total_ms, cached}
 
 
 # ── Cached resource initialisation ──────────────────────────────────────────
@@ -171,6 +176,8 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.last_chunks = []
         st.session_state.last_category = ""
+        st.session_state.response_cache = {}
+        st.session_state.last_latency = {}
         st.rerun()
 
     # Reset entire system (clear data + chat)
@@ -182,6 +189,8 @@ with st.sidebar:
             st.session_state.messages = []
             st.session_state.last_chunks = []
             st.session_state.last_category = ""
+            st.session_state.response_cache = {}
+            st.session_state.last_latency = {}
             get_stores.clear()
             st.success("System reset — all data cleared. Click 'Ingest Data' to reload.")
         except Exception as exc:
@@ -218,6 +227,28 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# Show citations and latency below the last assistant message (persists after rerun)
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+    if st.session_state.last_chunks:
+        sources = list(dict.fromkeys(
+            c["metadata"]["source_title"]
+            for c in st.session_state.last_chunks
+            if c.get("metadata", {}).get("source_title")
+        ))
+        if sources:
+            st.caption("📚 Sources: " + " · ".join(f"**{s}**" for s in sources))
+
+    lat = st.session_state.last_latency
+    if lat:
+        if lat.get("cached"):
+            st.caption("⚡ Cached response (0 ms)")
+        else:
+            st.caption(
+                f"⏱ Retrieval: {lat['retrieval_ms']:.0f} ms · "
+                f"Generation: {lat['generation_ms']:.0f} ms · "
+                f"Total: {lat['total_ms']:.0f} ms"
+            )
+
 # Show retrieved chunks from last turn
 if show_chunks and st.session_state.last_chunks:
     with st.expander(
@@ -237,51 +268,111 @@ if show_chunks and st.session_state.last_chunks:
 # Generate response for pending query (survives widget-triggered reruns)
 if st.session_state.pending_query:
     query = st.session_state.pending_query
+    cache_key = (query.strip().lower(), selected_model, top_k)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                embedder = get_embedder()
-                _, vector_store = get_stores()
-                counts = vector_store.collection_counts()
-                total_docs = sum(counts.values())
+        # ── Check cache first ────────────────────────────────────────────
+        if cache_key in st.session_state.response_cache:
+            cached = st.session_state.response_cache[cache_key]
+            answer = cached["answer"]
+            st.session_state.last_chunks = cached["chunks"]
+            st.session_state.last_category = cached["category"]
+            st.session_state.last_latency = {
+                "retrieval_ms": cached["latency"]["retrieval_ms"],
+                "generation_ms": cached["latency"]["generation_ms"],
+                "total_ms": cached["latency"]["total_ms"],
+                "cached": True,
+            }
+        else:
+            with st.spinner("Thinking..."):
+                try:
+                    embedder = get_embedder()
+                    _, vector_store = get_stores()
+                    counts = vector_store.collection_counts()
+                    total_docs = sum(counts.values())
 
-                if total_docs == 0:
-                    answer = (
-                        "The knowledge base is empty. "
-                        'Please click "Ingest Data" in the sidebar first.'
-                    )
-                    st.session_state.last_chunks = []
-                    st.session_state.last_category = ""
-                else:
-                    retriever = Retriever(vector_store=vector_store, embedder=embedder)
-                    result = retriever.retrieve(query, k=top_k)
+                    if total_docs == 0:
+                        answer = (
+                            "The knowledge base is empty. "
+                            'Please click "Ingest Data" in the sidebar first.'
+                        )
+                        st.session_state.last_chunks = []
+                        st.session_state.last_category = ""
+                        st.session_state.last_latency = {}
+                    else:
+                        # ── Retrieval with timing ────────────────────────
+                        t0 = time.perf_counter()
+                        retriever = Retriever(vector_store=vector_store, embedder=embedder)
+                        result = retriever.retrieve(query, k=top_k)
+                        t_retrieval = time.perf_counter()
 
-                    st.session_state.last_chunks = result["chunks"]
-                    st.session_state.last_category = result["category"]
+                        st.session_state.last_chunks = result["chunks"]
+                        st.session_state.last_category = result["category"]
 
-                    # Build history for multi-turn context
-                    # Skip assistant "I don't know" turns — the LLM tends to
-                    # copy previous refusals even when fresh context is adequate.
-                    history = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.messages[:-1]
-                        if not (m["role"] == "assistant"
-                                and "I don't know" in m.get("content", ""))
-                    ]
+                        # Build history for multi-turn context
+                        history = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.messages[:-1]
+                            if not (m["role"] == "assistant"
+                                    and "I don't know" in m.get("content", ""))
+                        ]
 
-                    generator = Generator(model=selected_model)
-                    answer = generator.generate(
-                        query=query,
-                        chunks=result["chunks"],
-                        chat_history=history,
-                    )
+                        # ── Generation with timing ───────────────────────
+                        generator = Generator(model=selected_model)
+                        answer = generator.generate(
+                            query=query,
+                            chunks=result["chunks"],
+                            chat_history=history,
+                        )
+                        t_generation = time.perf_counter()
 
-            except Exception as exc:
-                logger.exception("Chat error")
-                answer = f"An unexpected error occurred: {exc}"
+                        retrieval_ms = (t_retrieval - t0) * 1000
+                        generation_ms = (t_generation - t_retrieval) * 1000
+                        total_ms = (t_generation - t0) * 1000
+
+                        st.session_state.last_latency = {
+                            "retrieval_ms": retrieval_ms,
+                            "generation_ms": generation_ms,
+                            "total_ms": total_ms,
+                            "cached": False,
+                        }
+
+                        # ── Store in cache ───────────────────────────────
+                        st.session_state.response_cache[cache_key] = {
+                            "answer": answer,
+                            "chunks": result["chunks"],
+                            "category": result["category"],
+                            "latency": st.session_state.last_latency,
+                        }
+
+                except Exception as exc:
+                    logger.exception("Chat error")
+                    answer = f"An unexpected error occurred: {exc}"
+                    st.session_state.last_latency = {}
 
         st.markdown(answer)
+
+        # ── Citations — show source articles below the answer ────────────
+        if st.session_state.last_chunks:
+            sources = list(dict.fromkeys(
+                c["metadata"]["source_title"]
+                for c in st.session_state.last_chunks
+                if c.get("metadata", {}).get("source_title")
+            ))
+            if sources:
+                st.caption("📚 Sources: " + " · ".join(f"**{s}**" for s in sources))
+
+        # ── Latency display ──────────────────────────────────────────────
+        lat = st.session_state.last_latency
+        if lat:
+            if lat.get("cached"):
+                st.caption("⚡ Cached response (0 ms)")
+            else:
+                st.caption(
+                    f"⏱ Retrieval: {lat['retrieval_ms']:.0f} ms · "
+                    f"Generation: {lat['generation_ms']:.0f} ms · "
+                    f"Total: {lat['total_ms']:.0f} ms"
+                )
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
     st.session_state.pending_query = None
