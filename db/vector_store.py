@@ -135,3 +135,16 @@ class VectorStore:
             PEOPLE_COLLECTION: self._people.count(),
             PLACES_COLLECTION: self._places.count(),
         }
+
+    def reset_all(self) -> None:
+        """Delete all vectors from both collections — full system reset."""
+        self._client.delete_collection(PEOPLE_COLLECTION)
+        self._client.delete_collection(PLACES_COLLECTION)
+        # Re-create empty collections so the app keeps working
+        self._people = self._client.get_or_create_collection(
+            PEOPLE_COLLECTION, metadata={"hnsw:space": "cosine"},
+        )
+        self._places = self._client.get_or_create_collection(
+            PLACES_COLLECTION, metadata={"hnsw:space": "cosine"},
+        )
+        logger.info("VectorStore reset — both collections cleared.")

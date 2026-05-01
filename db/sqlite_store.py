@@ -126,3 +126,10 @@ class SQLiteStore:
     def get_chunk_count(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+    def reset_all(self) -> None:
+        """Delete all entities and chunks — full system reset."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM chunks")
+            conn.execute("DELETE FROM entities")
+        logger.info("SQLite reset — all entities and chunks deleted.")

@@ -173,6 +173,21 @@ with st.sidebar:
         st.session_state.last_category = ""
         st.rerun()
 
+    # Reset entire system (clear data + chat)
+    if st.button("Reset System", use_container_width=True, type="secondary"):
+        try:
+            sqlite_store, vector_store = get_stores()
+            sqlite_store.reset_all()
+            vector_store.reset_all()
+            st.session_state.messages = []
+            st.session_state.last_chunks = []
+            st.session_state.last_category = ""
+            get_stores.clear()
+            st.success("System reset — all data cleared. Click 'Ingest Data' to reload.")
+        except Exception as exc:
+            st.error(f"Reset failed: {exc}")
+            logger.exception("Reset error")
+
     st.markdown("---")
 
     # DB stats
