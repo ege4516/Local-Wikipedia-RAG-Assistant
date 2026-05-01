@@ -51,6 +51,10 @@ Existing solutions (ChatGPT, Gemini) either require cloud access, incur API cost
 | U4 | Toggle: show retrieved source chunks |
 | U5 | Clear Chat button |
 | U6 | Friendly error messages when Ollama is not running |
+| U7 | Reset System button — clears all ingested data (SQLite + ChromaDB) and chat history |
+| U8 | Source citations below each answer (📚 Sources: **Einstein** · **Tesla**) |
+| U9 | Latency display — retrieval, generation, and total time per query |
+| U10 | Response caching — identical queries return instantly from in-memory cache |
 
 ### 5.3 Nice to Have (Future)
 
