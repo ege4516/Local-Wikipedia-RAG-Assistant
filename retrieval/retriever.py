@@ -36,24 +36,6 @@ class Retriever:
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
-    def _retrieve_single(
-        self, query: str, category: str, k: int
-    ) -> list[dict]:
-        """Embed *query* once and search the appropriate collection(s)."""
-        embedding = self._embedder.get_embedding(query)
-        if embedding is None:
-            logger.error("Failed to embed query.")
-            return []
-
-        if category == "both":
-            person_chunks = self._vs.query(embedding, "person", k=k)
-            place_chunks = self._vs.query(embedding, "place", k=k)
-            all_chunks = person_chunks + place_chunks
-            all_chunks.sort(key=lambda c: c["distance"])
-            return all_chunks[:k]
-
-        return self._vs.query(embedding, category, k=k)
-
     @staticmethod
     def _extract_entity_names(query: str) -> list[str]:
         """Return distinct entity names mentioned in *query*."""
@@ -89,36 +71,48 @@ class Retriever:
                 "Multi-entity query detected — running per-entity retrieval for: %s",
                 entity_names,
             )
+            # Fetch enough chunks per entity so each is well-represented.
             per_entity_k = max(3, k)
             seen_ids: set[str] = set()
-            merged: list[dict] = []
+            # Collect chunks per entity separately to allow round-robin merge.
+            per_entity_chunks: list[list[dict]] = []
 
             for name in entity_names:
-                # Determine which collection this entity belongs to
                 name_lower = name.lower()
                 if any(p.lower() == name_lower for p in PEOPLE):
                     etype = "person"
                 elif any(p.lower() == name_lower for p in PLACES):
                     etype = "place"
                 else:
-                    etype = category  # fallback
+                    etype = category
 
                 embedding = self._embedder.get_embedding(f"Tell me about {name}")
                 if embedding is None:
                     continue
+                per_entity_chunks.append(
+                    self._vs.query(embedding, etype, k=per_entity_k)
+                )
 
-                chunks = self._vs.query(embedding, etype, k=per_entity_k)
-                for c in chunks:
-                    cid = (
-                        c.get("metadata", {}).get("source_title", "")
-                        + str(c.get("metadata", {}).get("chunk_index", ""))
-                    )
-                    if cid not in seen_ids:
-                        seen_ids.add(cid)
-                        merged.append(c)
-
-            merged.sort(key=lambda c: c["distance"])
-            chunks = merged[:k]
+            # Round-robin interleave: alternate chunks across entities so that
+            # every entity is represented even when distance values come from
+            # different query embeddings and are not directly comparable.
+            chunks = []
+            max_len = max((len(ec) for ec in per_entity_chunks), default=0)
+            for i in range(max_len):
+                for ec in per_entity_chunks:
+                    if i < len(ec):
+                        c = ec[i]
+                        cid = (
+                            c.get("metadata", {}).get("source_title", "")
+                            + str(c.get("metadata", {}).get("chunk_index", ""))
+                        )
+                        if cid not in seen_ids:
+                            seen_ids.add(cid)
+                            chunks.append(c)
+                    if len(chunks) >= k:
+                        break
+                if len(chunks) >= k:
+                    break
         else:
             # ── Single-entity or generic query ───────────────────────────
             embedding = self._embedder.get_embedding(query)

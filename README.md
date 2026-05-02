@@ -101,7 +101,6 @@ project/
 ├── ingest_all.py             ← Standalone ingestion CLI script
 ├── config.py                 ← All configuration constants
 ├── requirements.txt
-├── .env.example
 ├── db/
 │   ├── sqlite_store.py       ← Raw text + chunk metadata persistence
 │   └── vector_store.py       ← ChromaDB wrapper (two collections)

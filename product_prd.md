@@ -124,7 +124,7 @@ Implementation: `db/vector_store.py:21-30`
 **Why Option A was the right call here:**
 
 1. The classifier outputs a hard category label (`person` / `place` / `both`). Routing by collection makes that label load-bearing — if classification is correct, the wrong category never even sees the query.
-2. The "both" path explicitly merges results from the two collections by distance (`retrieval/retriever.py:54-58`), giving the *application* control over how cross-category results are combined rather than letting one shared index decide implicitly.
+2. The "both" path explicitly merges results from the two collections by distance (`retrieval/retriever.py:111-116`), giving the *application* control over how cross-category results are combined rather than letting one shared index decide implicitly. For multi-entity queries ("Compare Einstein and Tesla") the retriever runs per-entity embeddings and deduplicates (`retrieval/retriever.py:69-103`).
 3. The data set is small but heterogeneous (biographies vs. landmarks have very different vocabulary). Separate indexes mean cosine distances are calibrated within a category, not across them.
 
 ### 9.3 Retrieval — rule-based classifier + cosine similarity
@@ -135,16 +135,19 @@ Implementation: `retrieval/query_classifier.py`, `retrieval/retriever.py`
 - If no entity name matches, fall back to **keyword scoring** with two curated vocabulary sets. A 2:1 winning ratio is required to commit to a single category — otherwise the system queries both collections.
 - The classifier is intentionally cheap and explainable. There is no ML model to train, version, or debug.
 
-### 9.4 Generation — strict context-only system prompt
+### 9.4 Generation — context-grounded system prompt
 
-Implementation: `generation/generator.py:17-25`
+Implementation: `generation/generator.py:17-30`
 
-The system prompt enforces eight rules in priority order, the most important being:
-- Answer **only** from the supplied context.
-- If context is insufficient, return the literal string `"I don't know based on the available data."`
-- Never hallucinate facts, dates, names, or figures.
+The system prompt has ten guidelines. The most important are:
+- Answer using **facts from the context passages** — no outside knowledge.
+- Do **not** make up facts that are not in the context (Rule 6).
+- If the context is only partially relevant, answer the parts that can be confirmed and state what is missing (Rule 7–8).
+- Only return `"I don't know based on the available data."` when the passages contain **absolutely no** relevant information (Rule 9).
 
-Additional rules allow the model to synthesize and compare information from multiple passages (Rule 7) and to scan all passages for general-topic queries (Rule 8). We deliberately do not use few-shot examples or chain-of-thought scaffolding — the prompt is short, deterministic, and easy to audit. The retrieved chunks are formatted with explicit source labels (`--- Passage N (Source: <title>) ---`) so the LLM is encouraged to cite, and so a human reviewer can spot-check whether an answer is grounded.
+This is intentionally more flexible than a blanket "only from context" rule: partial answers are better than false refusals. Any refusal-variant the model produces is normalised to the canonical `_IDK` string by `_is_refusal()` (`generation/generator.py:74-82`), so callers always receive a consistent signal.
+
+Rules 5–6 explicitly guide the model on "which person/place" queries: the source title of the retrieved passages is the answer candidate, and the model should use it directly. Rules 4 and 8–9 cover comparison and partial-answer scenarios. We deliberately do not use few-shot examples or chain-of-thought scaffolding — the prompt is short and easy to audit. The retrieved chunks are formatted with explicit source labels (`--- Passage N (Source: <title>) ---`) so the LLM is encouraged to cite, and so a human reviewer can spot-check whether an answer is grounded.
 
 ## 10. Risks
 

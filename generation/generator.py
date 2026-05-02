@@ -23,11 +23,12 @@ Guidelines:
 2. Cite the source when possible (e.g., "According to the passage about Nikola Tesla, ...").
 3. Be concise and factual.
 4. When comparing subjects, use information from multiple passages.
-5. For general questions (e.g., "who is associated with electricity"), scan ALL passages for relevant information.
-6. Do NOT make up facts that are not in the context.
-7. If the context is only partially relevant, answer only the parts you can confirm from the passages.
-8. If comparing two subjects but the context only covers one, answer what you know and state that data for the other subject is not available.
-9. Only say "I don't know based on the available data." if the passages contain absolutely NO relevant information about the topic."""
+5. For "which person" or "which place" questions, look at the SOURCE TITLE of each passage — that is the entity the passage is about. Use the source title as the subject of your answer and support it with facts from the passage.
+6. For general concept questions (e.g., "who is associated with electricity?"), the source titles of the retrieved passages identify the relevant people or places — name them and explain the connection using passage content.
+7. Do NOT make up facts that are not in the context.
+8. If the context is only partially relevant, answer only the parts you can confirm from the passages.
+9. If comparing two subjects but the context only covers one, answer what you know and state that data for the other subject is not available.
+10. Only say "I don't know based on the available data." if the passages contain absolutely NO relevant information about the topic."""
 
 
 def _build_context_block(chunks: list[dict]) -> str:

@@ -29,7 +29,7 @@ _PERSON_KEYWORDS = {
     "he", "she", "his", "her", "him", "himself", "herself",
     "man", "woman", "person", "people", "life", "career",
     "biography", "childhood", "nationality", "wife", "husband", "child",
-    "discover", "famous",
+    "discover",
 }
 
 # Signals that suggest the query is about a place / landmark

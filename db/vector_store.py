@@ -140,11 +140,16 @@ class VectorStore:
         """Delete all vectors from both collections — full system reset."""
         self._client.delete_collection(PEOPLE_COLLECTION)
         self._client.delete_collection(PLACES_COLLECTION)
-        # Re-create empty collections so the app keeps working
+        # Re-create empty collections — must pass embedding_function=None so
+        # Chroma does not auto-embed our externally supplied vectors.
         self._people = self._client.get_or_create_collection(
-            PEOPLE_COLLECTION, metadata={"hnsw:space": "cosine"},
+            PEOPLE_COLLECTION,
+            embedding_function=None,
+            metadata={"hnsw:space": "cosine"},
         )
         self._places = self._client.get_or_create_collection(
-            PLACES_COLLECTION, metadata={"hnsw:space": "cosine"},
+            PLACES_COLLECTION,
+            embedding_function=None,
+            metadata={"hnsw:space": "cosine"},
         )
         logger.info("VectorStore reset — both collections cleared.")

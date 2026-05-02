@@ -76,11 +76,13 @@ Replace local ChromaDB with a managed vector store for persistence, scalability,
 
 ### Embedding service
 
-Replace the per-request Ollama call with a dedicated embedding microservice:
+The local prototype uses **sentence-transformers** (`all-MiniLM-L6-v2`) in-process — no separate embedding server. Under multi-user load this becomes a bottleneck because the model is loaded once per worker process.
 
-- **Option A — vLLM**: Serves any HuggingFace model with OpenAI-compatible API. Supports batching and tensor parallelism. Best for GPU servers.
-- **Option B — Infinity (MIT)**: Lightweight embedding-only server, supports nomic-embed-text natively. `docker run michaelf34/infinity`.
-- **Option C — Ollama behind a load balancer**: Simplest migration path; run 2–4 Ollama replicas behind nginx. Limited batching.
+Replace the in-process encode call with a dedicated embedding microservice:
+
+- **Option A — Infinity (MIT)**: Lightweight embedding-only REST server, supports `all-MiniLM-L6-v2` and other sentence-transformers models natively. `docker run michaelf34/infinity`.
+- **Option B — vLLM**: Serves any HuggingFace model with OpenAI-compatible API. Supports batching and tensor parallelism. Best for GPU servers.
+- **Option C — Ollama behind a load balancer**: Run 2–4 Ollama replicas with `nomic-embed-text` behind nginx. Simple migration if switching back to Ollama embeddings; limited batching.
 
 ### LLM service
 
