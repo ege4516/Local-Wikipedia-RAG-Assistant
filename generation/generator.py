@@ -14,17 +14,20 @@ logger = logging.getLogger(__name__)
 
 _CHAT_ENDPOINT = f"{OLLAMA_BASE_URL}/api/chat"
 
-_SYSTEM_PROMPT = """You are a knowledgeable assistant that answers questions based on the provided context passages from Wikipedia.
+_SYSTEM_PROMPT = """You are a helpful assistant. You will be given context passages from Wikipedia and a question. Your job is to answer the question using the context.
 
-Rules you MUST follow:
-1. Answer ONLY using information present in the context passages below.
-2. If the context does not contain enough information to answer the question, respond with exactly: "I don't know based on the available data."
-3. Never invent, guess, or hallucinate any facts, dates, names, or figures.
-4. If the question asks about a person or place not mentioned in the context, say "I don't know based on the available data."
-5. Cite the source title when possible (e.g., "According to the passage about Albert Einstein, ...").
-6. Be concise and factual.
-7. When asked to compare two or more subjects, you MAY synthesize and contrast information from different context passages. Highlight similarities and differences using only facts found in the passages.
-8. When asked about a general topic (e.g., "who is associated with electricity"), look through ALL provided passages for relevant information before responding."""
+IMPORTANT: The context passages below contain the information you need. Read them carefully and answer the question based on what you find. Always prioritize the context in the LAST user message over any previous context.
+
+Guidelines:
+1. Answer the question using facts from the context passages.
+2. Cite the source when possible (e.g., "According to the passage about Nikola Tesla, ...").
+3. Be concise and factual.
+4. When comparing subjects, use information from multiple passages.
+5. For general questions (e.g., "who is associated with electricity"), scan ALL passages for relevant information.
+6. Do NOT make up facts that are not in the context.
+7. If the context is only partially relevant, answer only the parts you can confirm from the passages.
+8. If comparing two subjects but the context only covers one, answer what you know and state that data for the other subject is not available.
+9. Only say "I don't know based on the available data." if the passages contain absolutely NO relevant information about the topic."""
 
 
 def _build_context_block(chunks: list[dict]) -> str:
@@ -36,6 +39,47 @@ def _build_context_block(chunks: list[dict]) -> str:
         title = chunk.get("metadata", {}).get("source_title", "Unknown")
         parts.append(f"--- Passage {i} (Source: {title}) ---\n{chunk['text']}")
     return "\n\n".join(parts)
+
+
+_IDK = "I don't know based on the available data."
+
+_REFUSAL_PHRASES = [
+    "i don't know",
+    "i don\u2019t know",
+    "i do not know",
+    "no relevant information",
+    "couldn't find any information",
+    "could not find any information",
+    "is not mentioned in the context",
+    "is not mentioned in the provided",
+    "not available in the provided",
+    "i don't have any information",
+    "i don't have information",
+    "i cannot answer",
+    "i can't answer",
+    "none of the context passages",
+    "none of the provided passages",
+    "the context does not contain",
+    "the passages do not contain",
+    "not present in the context",
+    "not in the provided context",
+    "i can not provide",
+    "i cannot provide",
+    "don't have any relevant information",
+    "no relevant data",
+    "i don't see a question",
+]
+
+
+def _is_refusal(text: str) -> bool:
+    """Return True if the LLM response is essentially a refusal.
+
+    Only checks the first 250 characters to avoid false positives where
+    a refusal-like phrase appears inside an otherwise valid answer
+    (e.g. 'As not mentioned in earlier sources, Einstein was born in Ulm').
+    """
+    head = text[:250].lower()
+    return any(phrase in head for phrase in _REFUSAL_PHRASES)
 
 
 class Generator:
@@ -61,6 +105,10 @@ class Generator:
         chat_history: list of {"role": "user"|"assistant", "content": "..."}
         Returns the assistant reply string.
         """
+        # Early exit — no point calling the LLM with zero context
+        if not chunks:
+            return _IDK
+
         context = _build_context_block(chunks)
         user_message = f"Context passages:\n\n{context}\n\nQuestion: {query}"
 
@@ -87,6 +135,11 @@ class Generator:
             logger.info(
                 "Generated %d-char response with model '%s'.", len(content), self.model
             )
+
+            # Normalize any refusal variant to the canonical string
+            if _is_refusal(content):
+                return _IDK
+
             return content
 
         except requests.exceptions.ConnectionError:
@@ -117,3 +170,4 @@ class Generator:
             return [m["name"] for m in resp.json().get("models", [])]
         except Exception:
             return []
+

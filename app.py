@@ -218,9 +218,19 @@ st.caption("Ask about famous people and places. Everything runs locally.")
 
 # Chat input — accept new query, save to session state, rerun
 if user_input := st.chat_input("Ask about a person or place..."):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    st.session_state.pending_query = user_input
-    st.rerun()
+    cleaned = user_input.strip()
+    # Reject empty, whitespace-only, or very short gibberish input
+    if len(cleaned) < 2 or not any(c.isalpha() for c in cleaned):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": "I don't know based on the available data.",
+        })
+        st.rerun()
+    else:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.session_state.pending_query = user_input
+        st.rerun()
 
 # Render existing messages
 for msg in st.session_state.messages:
